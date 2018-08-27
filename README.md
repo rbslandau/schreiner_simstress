@@ -8,10 +8,10 @@ Scripts written by Verena C. Schreiner and Eduard Szöcs, revised by Ralf B. Sch
 
 ## Description of material ##
 
-ECOLIND_6908_script.R:			 *Provides the R code to run the analyses and to plot the results.*  
+R_Similar Stress Response.Rmd:			 *Provides the R Markdown code to run the analyses and to plot the results.*  
 
-ID_abundance.csv:				*Abundance of species in sites*   
+R_Similar_Stress_Response.html:				*Resulting html from R Markdown document*   
 
-ID_traits.csv:				*Affinity scores for trait modalities of taxa found in study*  
+Raw_Conidia.csv:				*Data on conidia*  
 
-Labels_traits.csv:		*Labels for traits*
+rawdata.csv:		*Data on leaf breakdown and experimental conditions*
