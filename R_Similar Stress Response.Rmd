@@ -1,0 +1,1807 @@
+---
+editor_options:
+  chunk_output_type: console
+output:
+  html_document:
+    fig_caption: yes
+    figure_caption: yes
+    highlight: tango
+    number_sections: yes
+    toc: yes
+    toc_depth: 4
+  pdf_document:
+    toc: yes
+    toc_depth: '4'
+  word_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Similar dynamics of microbial functional stress response across biogeographical regions
+
+Verena C. Schreiner, Alexander Feckler, Diego Fernández, Katharina Frisch, Katherine Muñoz, Eduard Szöcs, Jochen Zubrod, Mirco Bundschuh, Jes J. Rasmussen, Ben J. Kefford, Josepha Axelsen, Nina Cedergreen  & Ralf B. Schäfer
+
+R script written by Verena C. Schreiner and Eduard Szöcs  
+University of Koblenz-Landau  
+Fortstrasse 7  
+76829 Landau  
+GERMANY  
+Corresponding mail adress: schreiner-verena'@'uni-landau.de
+
+## Tools / Packages
+
+```{r, message=FALSE}
+library(ggplot2)
+library(vegan)
+library(lsmeans)
+library(effects)
+library(cowplot)
+library(Rmisc)
+library(lme4)
+require(reshape2)
+```
+
+## Load & Clean Data
+
+```{r}
+# project path, change to the path you safed the rawfiles
+prj <- getwd()
+
+data_all <- read.table(file.path(prj, "rawdata.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA")) 
+
+data_conid <- read.table(file.path(prj, "Raw_Conidia.csv"), 
+                      header = TRUE, 
+                      sep = ";", 
+                      na.strings = c("NR", "NA")) 
+```
+
+Encode factors.
+```{r}
+data_all$Number.replicate <- factor(data_all$Number.replicate)
+data_all$cycle <- factor(data_all$cycle)
+
+# recode fungicide order
+data_all$fungicide <- factor(data_all$fungicide, 
+                             levels = c("control", "TU-1"))
+str(data_all)
+
+data_conid$Number.replicate <- factor(data_conid$Number.replicate)
+data_conid$cycle <- factor(data_conid$cycle)
+
+# recode fungicide order
+data_conid$fungicide <- factor(data_conid$fungicide, 
+                             levels = c("control", "TU-1"))
+```
+
+
+### explanatory variables
+* region (factor; categorical; Denmark, Germany, Sweden and Australia)
+* fungicide (factor; categorical; control and treated)
+* cycle (factor; categorical; 1, 2, and 3)
+
+
+### Calculting decomposed leaf mass (DLM)
+The data from this endpint are % of lost leaf mass, divided with number degreedays (to 
+normalise for temperature differences)
+
+```{r}
+data_all$DLM <- ifelse(data_all$cycle =="1", 
+                       (((data_all$weight.start - data_all$weight.end)
+                         / data_all$weight.start)
+                        / ((1*data_all$Temp_field + 2*data_all$Temp_lab)/3)),
+                       ((data_all$weight.start - data_all$weight.end) 
+                        / data_all$weight.start) / (data_all$Temp_lab))
+
+```
+
+### calculating DLM of fungicide treatment relative to respective controls
+
+change formatting of data
+```{r}
+data_all_OMD <- data_all[,c(1,2,3,5,11)]
+
+data_all_OMD_control_u <- data_all_OMD[data_all_OMD$fungicide == "control",]
+data_all_OMD_control <-  melt(data_all_OMD_control_u, id = c("fungicide", "cycle", "region",
+                                                             "Number.replicate"))
+
+data_all_OMD_control <- dcast(data_all_OMD_control, fungicide + cycle + region ~ variable, mean)
+
+data_all_OMD_control <- merge(data_all_OMD_control_u[-5], data_all_OMD_control, 
+                              by=c("fungicide", "cycle", "region"))
+names(data_all_OMD_control)[5] <- c("control")
+data_all_OMD_control <- data_all_OMD_control[-1]
+
+data_all_OMD_trt <- data_all_OMD[! data_all_OMD$fungicide == "control",]
+data_all_OMD_trt <- data_all_OMD_trt[-1]
+
+data_all_OMD_perc <- merge(data_all_OMD_control, data_all_OMD_trt, by=c("cycle", "region",
+                                                                        "Number.replicate"))
+names(data_all_OMD_perc)[5] <- c("treatment")
+
+```
+
+calulating relative differences of fungicide treatment to the respective controls
+```{r}
+data_all_OMD_perc$diff <- ((data_all_OMD_perc$treatment - data_all_OMD_perc$control) /   
+                             data_all_OMD_perc$control)*100
+```
+
+
+### dividing dataset into different biogeographical regions
+
+* Germany
+
+```{r}
+data_ger <- subset(data_all, region == 'Germany')
+rownames(data_ger) <- NULL
+
+data_conid_DE <- subset(data_conid, Region == 'DE')
+rownames(data_conid_DE) <- NULL
+
+conid_DE <- data_conid_DE[,c(5:63)]
+
+Fak_conid_DE <- data_conid_DE[,c(1:4)]
+Fak_conid_DE <- droplevels(Fak_conid_DE)
+```
+
+* Sweden
+
+```{r}
+data_SW <- subset(data_all, region == 'Sweden')
+rownames(data_SW) <- NULL
+
+data_conid_SW <- subset(data_conid, Region == 'SW')
+rownames(data_conid_SW) <- NULL
+
+conid_SW <- data_conid_SW[,c(5:63)]
+
+Fak_conid_SW <- data_conid_SW[,c(1:4)]
+Fak_conid_SW <- droplevels(Fak_conid_SW)
+```
+
+* Denmark
+
+```{r}
+data_DK <- subset(data_all, region == 'Denmark')
+rownames(data_DK) <- NULL
+
+data_conid_DK <- subset(data_conid, Region == 'DK')
+rownames(data_conid_DK) <- NULL
+
+conid_DK <- data_conid_DK[,c(5:63)]
+
+Fak_conid_DK <- data_conid_DK[,c(1:4)]
+Fak_conid_DK <- droplevels(Fak_conid_DK)
+```
+
+* Australia
+```{r}
+data_AUS <- subset(data_all, region == 'Australia')
+rownames(data_AUS) <- NULL
+```
+
+
+## decomposed leaf mass (DLM) -> functional response
+
+### all biogeographical regions
+
+#### Model the data
+##### Fit model
+Using a mixed model where the replicates are a random effect, which is nested in the regions
+```{r}
+mod1_all_OMD_perc <- lmer(diff ~ region + cycle + (region | Number.replicate),   
+                          data = data_all_OMD_perc)
+```
+
+##### Diagnose model
+First we check some model diagnostics:
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_all_OMD_perc)
+```
+
+Model fits.
+
+
+
+##### Investigate significance
+
+```{r}
+drop1(mod1_all_OMD_perc, test = 'Chisq')
+```
+
+Factor region is not significant, while the cycle displays a significant relationship.
+
+
+### Germany
+
+#### Model the data
+##### Fit model
+Based on the experimental design we can describe the model as follows (notation after Stroup 2013):
+
+* Linear predictor: $\eta_{ij} = \eta + \alpha_i + \beta_j + (\alpha\beta)_{ij}$, 
+where $\eta$ denotes the intercept, 
+$\alpha$: i = 1, 2, 3, 4 denotes the *i*th treatment effect, 
+$\beta$: j = 1, 2, 3 denotes the *j*th run effect and 
+$(\alpha\beta)_{ij}$ denotes the effect of the combination of treatment and run.
+* Distribution: $y \sim N(\mu_{ij}, \sigma^2)$, that is a Normal distribution, with fixed variance
+* Link (between linear predictor and Distribution): identity - $\mu = \eta$
+
+We fit our model using:
+
+```{r}
+mod1_DE_OMD <- lm(DLM ~ fungicide + cycle + fungicide:cycle,
+                  data = data_ger)
+```
+
+##### Diagnose model
+First we check some model diagnostics:
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DE_OMD)
+```
+
+Model fits.
+
+##### Investigate interactions
+
+```{r}
+drop1(mod1_DE_OMD, test = 'F')
+```
+
+This indicates a significant interaction between fungicide and cycle.
+
+
+##### Detailed look at parameters
+Let's futher investigate the differences using least-square means (lsmeans).
+
+This calculates the lsmeans for fungicides within each cycle.
+```{r}
+lsm_Germany <- lsmeans(mod1_DE_OMD, ~ fungicide | cycle)
+
+lsm_dunn <- contrast(lsm_Germany, 'trt.vs.ctrl')
+(lsm_dunn_sum <- summary(lsm_dunn, infer = TRUE, adjust = 'mvt'))
+```
+
+### Sweden
+
+#### Model the data
+##### Fit model
+We fit our model using:
+
+```{r}
+mod1_SW_OMD <- lm(DLM ~ fungicide + cycle + fungicide:cycle, 
+                  data = data_SW)
+```
+
+
+##### Diagnose model
+First we check some model diagnostics:
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_SW_OMD)
+```
+
+Model fits.
+
+##### Investigate interactions
+Let's move on to test the interactions.
+
+```{r}
+drop1(mod1_SW_OMD, test = 'F')
+```
+
+This indicates a non-significant interaction between fungicide and cycle, repeat with an easier model without interaction.
+
+##### Fit model without interaction
+```{r}
+mod1_SW_OMD_2 <- lm(DLM ~ fungicide + cycle, 
+           data = data_SW)
+```
+
+##### Diagnose model without interaction
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_SW_OMD_2)
+```
+
+Model fits
+
+##### Investigate significance of parameters
+
+```{r}
+drop1(mod1_SW_OMD_2, test = 'F')
+```
+
+
+##### Detailed look at paramaters
+Let's futher investigate the differences using least-square means (lsmeans).
+
+This calculates the lsmeans for fungicides within each cycle.
+```{r}
+lsm_Sweden <- lsmeans(mod1_SW_OMD, ~ fungicide | cycle)
+
+lsm_dunn <- contrast(lsm_Sweden, 'trt.vs.ctrl')
+(lsm_dunn_sum <- summary(lsm_dunn, infer = TRUE, adjust = 'mvt'))
+```
+
+
+### Denmark
+
+#### Model the data
+##### Fit model
+We fit our model using:
+
+```{r}
+mod1_DK_OMD <- lm(DLM ~ fungicide + cycle + fungicide:cycle, 
+               data = data_DK)
+```
+
+
+##### Diagnose model
+First we check some model diagnostics:
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_OMD)
+```
+
+Model fits.
+
+##### Investigate interactions
+Let's move on to test the interactions.
+
+```{r}
+drop1(mod1_DK_OMD, test = 'F')
+```
+
+This indicates a non-significant interaction between fungicide and cycle, repeat with an easier model without interaction.
+
+##### Fit model withour interaction
+
+```{r}
+mod1_DK_OMD_2 <- lm(DLM ~ fungicide + cycle, 
+                 data = data_DK)
+```
+
+##### Diagnose model without interaction
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_OMD_2)
+```
+
+##### Investigate significance of parameters
+```{r}
+drop1(mod1_DK_OMD_2, test = 'F')
+```
+
+
+##### Detailed look at parameters
+Let's futher investigate the differences using least-square means (lsmeans).
+
+This calculates the lsmeans for fungicides within each cycle.
+```{r}
+lsm_Denmark <- lsmeans(mod1_DK_OMD, ~ fungicide | cycle)
+
+lsm_dunn <- contrast(lsm_Denmark, 'trt.vs.ctrl')
+(lsm_dunn_sum <- summary(lsm_dunn, infer = TRUE, adjust = 'mvt'))
+```
+
+
+## Hyphomycete community resposes -> structural response
+
+In Germany only data from cycle 2 + 3 available, due to technical difficulties.
+
+### Germany
+
+##### Making RDA
+
+Repeating RDA (and related Anovas) with different numbers and composition of explanatory variables, to be able to calculate effects sizes and p-values individually for each exlenatory variable.
+
+```{r}
+rda_species_DE_1 <- rda(decostand(conid_DE, "hellinger") 
+                        ~ cycle, data = Fak_conid_DE)
+summary(rda_species_DE_1, display = NULL)
+anova(rda_species_DE_1, by = "margin")
+
+
+rda_species_DE_2 <- rda(decostand(conid_DE, "hellinger") 
+                        ~ fungicide, data = Fak_conid_DE)
+summary(rda_species_DE_2, display = NULL)
+anova(rda_species_DE_2, by = "margin")
+
+rda_species_DE_3 <- rda(decostand(conid_DE, "hellinger") 
+                        ~ cycle + fungicide + fungicide:cycle, data = Fak_conid_DE)
+summary(rda_species_DE_3, display = NULL)
+anova(rda_species_DE_3, by = "margin")
+```
+
+Since the interaction of fungicide: cycle is not significant using a model with both variables but without interactions for the RDA Graph
+
+```{r}
+rda_species_DE_4 <- rda(decostand(conid_DE, "hellinger") 
+                        ~ cycle + fungicide, data = Fak_conid_DE)
+summary(rda_species_DE_4, display = NULL)
+anova(rda_species_DE_4, by = "margin")
+```
+
+
+### Sweden
+
+##### Making RDA
+
+Repeating RDA (and related Anovas) with different numbers and composition of explanatory variables, to be able to calculate effects sizes and p-values individually for each exlenatory variable.
+
+```{r}
+rda_species_SW_1 <- rda(decostand(conid_SW, "hellinger") 
+                        ~ cycle, data = Fak_conid_SW)
+summary(rda_species_SW_1, display = NULL)
+anova(rda_species_SW_1, by = "margin")
+
+
+rda_species_SW_2 <- rda(decostand(conid_SW, "hellinger") 
+                        ~ fungicide, data = Fak_conid_SW)
+summary(rda_species_SW_2, display = NULL)
+anova(rda_species_SW_2, by = "margin")
+
+rda_species_SW_3 <- rda(decostand(conid_SW, "hellinger") 
+                        ~ cycle + fungicide + fungicide:cycle, data = Fak_conid_SW)
+summary(rda_species_SW_3, display = NULL)
+anova(rda_species_SW_3, by = "margin")
+```
+
+Since the interaction of fungicide: cycle is not significant using a model with both variables but without interactions for the RDA Graph
+
+```{r}
+rda_species_SW_4 <- rda(decostand(conid_SW, "hellinger") 
+                        ~ cycle + fungicide, data = Fak_conid_SW)
+summary(rda_species_SW_4, display = NULL)
+anova(rda_species_SW_4, by = "margin")
+```
+
+
+### Denmark
+
+
+##### Making RDA
+
+Repeating RDA (and related Anovas) with different numbers and composition of explanatory variables, to be able to calculate effects sizes and p-values individually for each exlenatory variable.
+
+```{r}
+rda_species_DK_1 <- rda(decostand(conid_DK, "hellinger") 
+                        ~ cycle, data = Fak_conid_DK)
+summary(rda_species_DK_1, display = NULL)
+anova(rda_species_DK_1, by = "margin")
+
+
+rda_species_DK_2 <- rda(decostand(conid_DK, "hellinger") 
+                        ~ fungicide, data = Fak_conid_DK)
+summary(rda_species_DK_2, display = NULL)
+anova(rda_species_DK_2, by = "margin")
+
+rda_species_DK_3 <- rda(decostand(conid_DK, "hellinger") 
+                        ~ cycle + fungicide + fungicide:cycle, data = Fak_conid_DK)
+summary(rda_species_DK_3, display = NULL)
+anova(rda_species_DK_3, by = "margin")
+```
+
+Since the interaction of fungicide: cycle is significant using a model with  interactions for the RDA Graph
+
+
+## Species richness
+
+### Germany
+
+#### Model the data
+##### Fit model
+since we have count data (number of species) usage of a glm with poisson distribution
+
+```{r}
+mod1_DE_Spec <- glm(species ~ fungicide + cycle + fungicide:cycle, 
+                    data   = data_ger, 
+                    family = 'poisson')
+```
+
+##### Diagnose model
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DE_Spec)
+```
+Model fits
+
+##### Investigate Interactions
+```{r}
+drop1(mod1_DE_Spec, test = 'Chisq')
+```
+
+No interaction found, model again without interaction
+
+##### Fit model without interaction
+```{r}
+mod1_DE_Spec_wo2 <- glm(species ~ fungicide + cycle, 
+                        data   = data_ger, 
+                        family = 'poisson')
+```
+
+##### Diagnose model
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DE_Spec_wo2)
+```
+
+Model fits
+
+##### Investigate significance of parameters
+```{r}
+drop1(mod1_DE_Spec_wo2, test = 'Chisq')
+```
+
+
+### Denmark
+
+#### Model the data
+##### Fit model
+since we have count data usage of a glm with poisson distribution
+
+```{r}
+mod1_DK_Spec <- glm(species ~ fungicide + cycle + fungicide:cycle, 
+                    data   = data_DK, 
+                    family = 'poisson')
+```
+
+##### Diagnose model
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_Spec)
+```
+
+##### Investigate Interactions
+```{r}
+drop1(mod1_DK_Spec, test = 'Chisq')
+```
+
+No interaction found, model again without interaction
+
+##### Fit model without interaction
+```{r}
+mod1_DK_Spec_wo2 <- glm(species ~ fungicide + cycle, 
+                        data   = data_DK, 
+                        family = 'poisson')
+```
+
+##### Diagnose model
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_Spec_wo2)
+```
+
+
+```{r}
+drop1(mod1_DK_Spec_wo2, test = 'Chisq')
+```
+
+### Sweden
+#### Look at the data 
+```{r}
+ggplot(data_SW, aes(x = cycle, y = species, fill = fungicide)) +
+  geom_boxplot() +
+  theme_light()
+```
+
+#### Model the data
+##### Fit model
+since we have count data usage of a glm with poisson distribution
+
+```{r}
+mod1_SW_Spec <- glm(species ~ fungicide + cycle + fungicide:cycle, 
+           data = data_SW, family = 'poisson')
+```
+
+##### Diagnose model
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_SW_Spec)
+```
+
+##### Investigate Interactions
+```{r}
+drop1(mod1_SW_Spec, test = 'Chisq')
+```
+
+No interaction found, model again without interaction
+
+```{r}
+mod1_SW_Spec_wo2 <- glm(species ~ fungicide + cycle, 
+           data = data_SW, family = 'poisson')
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_Spec_wo2)
+```
+
+##### Investigate significance of parameters
+```{r}
+drop1(mod1_SW_Spec_wo2, test = 'Chisq')
+```
+
+
+## Stress responses of single hyphomycete taxa
+
+In this part we used the lowest level of determination reached in the different biogeographical regions. Only taxa occuring in at least two biogeographical regions are analysed.
+
+#### Sweden
+Looking closer at following species:
+* Articulospora tetracladia
+* Flagellospora curvula
+* Alatospora sp.
+* Anguillospora sp.
+
+#####  Articulospora tetracladia
+
+```{r}
+mod1_SW_At <- lm(Articulospora.tetracladia ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_SW)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_At)
+```
+
+Model shows outliers, they need to be excluded.
+
+```{r}
+data_conid_SW_excl <- data_conid_SW[-c(6,7,8,9, 10, 16),]
+```
+
+```{r}
+mod1_SW_At_ex <- lm(Articulospora.tetracladia ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_SW_excl)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_At_ex)
+```
+
+
+```{r}
+drop1(mod1_SW_At_ex, test = 'F')
+```
+
+no significant relationship, so redo model without interaction
+
+```{r}
+mod1_SW_At_wo <- lm(Articulospora.tetracladia ~ fungicide + cycle, 
+           data = data_conid_SW)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_At_wo)
+
+```
+
+exclude outlier:
+
+```{r}
+mod1_SW_At_wo_ex <- lm(Articulospora.tetracladia ~ fungicide + cycle, 
+           data = data_conid_SW_excl)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_At_wo_ex)
+```
+
+```{r}
+drop1(mod1_SW_At_wo_ex, test = 'F')
+
+plot(allEffects(mod1_SW_At_wo_ex))
+```
+
+#####  Flagellospora curvula
+```{r}
+mod1_SW_Fc <- lm(Flagellospora.curvula ~ fungicide + cycle  + 
+             fungicide:cycle , 
+           data = data_conid_SW)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_SW_Fc)
+```
+
+Model shows outliers, they need to be excluded.
+
+```{r}
+data_conid_SW_excl_1 <- data_conid_SW[-c(1, 7),]
+```
+
+```{r}
+mod1_SW_Fc_ex <- lm(Flagellospora.curvula ~ fungicide + cycle + fungicide:cycle , 
+           data = data_conid_SW_excl_1)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_Fc_ex)
+```
+
+still not perfect, but when regaring Cook's distance in Residuals vs Leverage graph model seems to
+to work
+
+```{r}
+drop1(mod1_SW_Fc_ex, test = 'F')
+```
+
+no significant relationship, so redo model without interaction
+
+```{r}
+mod1_SW_Fc_wo <- lm(Flagellospora.curvula ~ fungicide + cycle, 
+           data = data_conid_SW)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_Fc_wo)
+```
+
+Model shows again outlier
+
+```{r}
+mod1_SW_Fc_wo_ex <- lm(Flagellospora.curvula ~ fungicide + cycle, 
+           data = data_conid_SW_excl_1)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_Fc_wo_ex)
+```
+
+still not perfect, but when regaring Cook's distance in Residuals vs Leverage graph model seems to work
+
+```{r}
+drop1(mod1_SW_Fc_wo_ex, test = 'F')
+```
+
+#####  Alatospora sp.
+```{r}
+mod1_SW_Als <- lm(Alatospora.sp. ~ fungicide + cycle  +  fungicide:cycle , 
+           data = data_conid_SW)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_Als)
+```
+
+Exclude outliers
+
+```{r}
+data_conid_SW_excl <- data_conid_SW[-c(1,2),]
+
+mod1_SW_Als_ex <- lm(Alatospora.sp. ~ fungicide + cycle  +  fungicide:cycle , 
+           data = data_conid_SW_excl)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_Als_ex)
+```
+
+
+```{r}
+drop1(mod1_SW_Als_ex, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_SW_Als_wo <- lm(Alatospora.sp. ~ fungicide + cycle, 
+           data = data_conid_SW)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_Als_wo)
+
+```
+
+Exclude outliers
+
+```{r}
+mod1_SW_Als_wo_ex <- lm(Alatospora.sp. ~ fungicide + cycle , 
+           data = data_conid_SW_excl)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_Als_wo_ex)
+```
+
+
+```{r}
+drop1(mod1_SW_Als_wo_ex, test = 'F')
+
+plot(allEffects(mod1_SW_Als_wo))
+```
+
+
+#####  Anguillospora sp.
+
+```{r}
+mod1_SW_As <- lm(Anguillospora.sp. ~ fungicide + cycle +  
+             fungicide:cycle, 
+           data = data_conid_SW)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_SW_As)
+```
+
+Model fits.
+
+```{r}
+drop1(mod1_SW_As, test = 'F')
+```
+
+Interaction not significant, repeat with model without interaction.
+
+```{r}
+mod1_SW_As_wo <- lm(Anguillospora.sp. ~ fungicide + cycle , 
+           data = data_conid_SW)
+
+par(mfrow = c(2, 2))
+plot(mod1_SW_As_wo)
+```
+
+
+```{r}
+drop1(mod1_SW_As_wo, test = 'F')
+```
+
+
+
+### Germany
+Looking closer at following species:
+* Articulospora tetracladia
+* Flagellospora curvula
+* Tetrachaetum elegans
+* Tetracladium sp.
+* Tetracladium marchalianum
+
+#####  Articulospora tetracladia
+```{r}
+mod1_DE_At <- lm(Articulospora.tetracladia ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DE)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DE_At)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_At, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DE_At_wo2 <- lm(Articulospora.tetracladia ~ fungicide + cycle, 
+           data = data_conid_DE)
+
+par(mfrow = c(2, 2))
+plot(mod1_DE_At_wo2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_At_wo2, test = 'F')
+```
+
+#####  Flagellospora curvula
+```{r}
+mod1_DE_Fc <- lm(Flagellospora.curvula ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DE)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DE_Fc)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_Fc, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DE_Fc_wo2 <- lm(Flagellospora.curvula ~ fungicide + cycle, 
+           data = data_conid_DE)
+
+par(mfrow = c(2, 2))
+plot(mod1_DE_Fc_wo2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_Fc_wo2, test = 'F')
+```
+
+#####  Tetrachaetum elegans
+```{r}
+mod1_DE_Te <- lm(Tetrachaetum.elegans ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DE)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DE_Te)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_Te, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DE_Te_wo2 <- lm(Tetrachaetum.elegans ~ fungicide + cycle, 
+           data = data_conid_DE)
+
+par(mfrow = c(2, 2))
+plot(mod1_DE_Te_wo2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_Te_wo2, test = 'F')
+```
+
+#####  Tetracladium sp.
+```{r}
+mod1_DE_Ts <- lm(Tetracladium.sp. ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DE)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DE_Ts)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_Ts, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DE_Ts_wo2 <- lm(Tetracladium.sp. ~ fungicide + cycle, 
+           data = data_conid_DE)
+
+par(mfrow = c(2, 2))
+plot(mod1_DE_Ts_wo2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_Ts_wo2, test = 'F')
+```
+
+#####  Tetracladium marchalianum
+```{r}
+mod1_DE_Tm <- lm(Tetracladium.marchalianum ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DE)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DE_Tm)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_Tm, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DE_Tm_wo2 <- lm(Tetracladium.marchalianum ~ fungicide + cycle, 
+           data = data_conid_DE)
+
+par(mfrow = c(2, 2))
+plot(mod1_DE_Tm_wo2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DE_Tm_wo2, test = 'F')
+```
+
+
+
+### Denmark
+Looking closer at following species:
+* Articulospora tetracladia
+* Flagellospora curvula
+* Tetrachaetum elegans
+* Mycocentrospora clavata
+* Tetracladium sp.
+* Tetracladium marchalianum
+
+#####  Articulospora tetracladia
+```{r}
+mod1_DK_At <- lm(Articulospora.tetracladia ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DK)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_At)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_At, test = 'F')
+```
+
+remove interaction from the model
+
+```{r}
+mod1_DK_At2 <- lm(Articulospora.tetracladia ~ fungicide + cycle, 
+           data = data_conid_DK)
+
+par(mfrow = c(2, 2))
+plot(mod1_DK_At2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_At2, test = 'F')
+```
+
+#####  Flagellospora curvula
+```{r}
+mod1_DK_Fc <- lm(Flagellospora.curvula ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DK)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_Fc)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Fc, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DK_Fc_wo2 <- lm(Flagellospora.curvula ~ fungicide + cycle, 
+           data = data_conid_DK)
+
+par(mfrow = c(2, 2))
+plot(mod1_DK_Fc_wo2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Fc_wo2, test = 'F')
+```
+
+#####  Tetrachaetum elegans
+```{r}
+mod1_DK_Te <- lm(Tetrachaetum.elegans ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DK)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_Te)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Te, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DK_Te_wo2 <- lm(Tetrachaetum.elegans ~ fungicide + cycle, 
+           data = data_conid_DK)
+
+par(mfrow = c(2, 2))
+plot(mod1_DK_Te_wo2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Te_wo2, test = 'F')
+```
+
+
+#####  Mycocentrospora clavata
+```{r}
+mod1_DK_Mc <- lm(Mycocentrospora.clavata ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DK)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_Mc)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Mc, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DK_Mc_wo2 <- lm(Mycocentrospora.clavata ~ fungicide + cycle, 
+           data = data_conid_DK)
+
+par(mfrow = c(2, 2))
+plot(mod1_DK_Mc_wo2)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Mc_wo2, test = 'F')
+```
+
+
+#####  Tetracladium sp.
+```{r}
+mod1_DK_Ts <- lm(Tetracladium.sp. ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DK)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_Ts)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Ts, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DK_Ts_wo <- lm(Tetracladium.sp. ~ fungicide + cycle, 
+           data = data_conid_DK)
+
+par(mfrow = c(2, 2))
+plot(mod1_DK_Ts_wo)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Ts_wo, test = 'F')
+```
+
+#####  Tetracladium marchalianum
+```{r}
+mod1_DK_Tm <- lm(Tetracladium.marchalianum ~ fungicide + cycle  + 
+             fungicide:cycle, 
+           data = data_conid_DK)
+```
+
+Check model fitting
+
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_DK_Tm)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Tm, test = 'F')
+```
+
+Interaction not significant, reduce model.
+
+```{r}
+mod1_DK_Tm_wo <- lm(Tetracladium.marchalianum ~ fungicide + cycle, 
+           data = data_conid_DK)
+
+par(mfrow = c(2, 2))
+plot(mod1_DK_Tm_wo)
+```
+
+ok
+
+```{r}
+drop1(mod1_DK_Tm_wo, test = 'F')
+```
+
+
+
+## Preparing Fig.2: functional response
+
+We want to display the Effect size and its standard deviation of the fungicide treatment in relation to control treatments.
+
+### Calculating effect sizes of DLM + the respective standard deviations
+
+```{r}
+s_Germany <- as.data.frame(summary(lsm_Germany))
+s_Germany$region <- c("Germany")
+control <- s_Germany[s_Germany$fungicide =="control",]
+names(control)[3] <- c("mean_control")
+names(control)[6] <- c("lower_control")
+names(control)[7] <- c("upper_control")
+s_Germany <- s_Germany[s_Germany$fungicide =="TU-1",]
+names(s_Germany)[3] <- c("mean_TU-1")
+s_Germany <- cbind(s_Germany, control[c(3,6,7)])
+s_Germany$mean <- ((s_Germany$`mean_TU-1` - s_Germany$mean_control) /
+                     s_Germany$mean_control)*100
+s_Germany$lower_CI <- ((s_Germany$lower.CL - s_Germany$mean_control) /
+                         s_Germany$mean_control)*100
+s_Germany$upper_CI <- ((s_Germany$upper.CL - s_Germany$mean_control) /
+                         s_Germany$mean_control)*100
+s_Germany$lower_cont_CI <- ((s_Germany$lower_control - s_Germany$mean_control) /
+                              s_Germany$mean_control)*100
+s_Germany$upper_cont_CI <- ((s_Germany$upper_control - s_Germany$mean_control) /
+                              s_Germany$mean_control)*100
+s_Germany$sig <- c("*", " ", " ")
+s_Germany$region <- as.factor(s_Germany$region)
+
+
+s_Sweden <- as.data.frame(summary(lsm_Sweden))
+s_Sweden$region <- c("Sweden")
+control <- s_Sweden[s_Sweden$fungicide =="control",]
+names(control)[3] <- c("mean_control")
+names(control)[6] <- c("lower_control")
+names(control)[7] <- c("upper_control")
+s_Sweden <- s_Sweden[s_Sweden$fungicide =="TU-1",]
+names(s_Sweden)[3] <- c("mean_TU-1")
+s_Sweden <- cbind(s_Sweden, control[c(3,6,7)])
+s_Sweden$mean <- ((s_Sweden$`mean_TU-1` - s_Sweden$mean_control) /
+                    s_Sweden$mean_control)*100
+s_Sweden$lower_CI <- ((s_Sweden$lower.CL - s_Sweden$mean_control) /
+                        s_Sweden$mean_control)*100
+s_Sweden$upper_CI <- ((s_Sweden$upper.CL - s_Sweden$mean_control) /
+                        s_Sweden$mean_control)*100
+s_Sweden$lower_cont_CI <- ((s_Sweden$lower_control - s_Sweden$mean_control) /
+                             s_Sweden$mean_control)*100
+s_Sweden$upper_cont_CI <- ((s_Sweden$upper_control - s_Sweden$mean_control) /
+                             s_Sweden$mean_control)*100
+s_Sweden$sig <- c("*", " ", " ")
+s_Sweden$region <- as.factor(s_Sweden$region)
+
+s_Denmark <- as.data.frame(summary(lsm_Denmark))
+s_Denmark$region <- c("Denmark")
+control <- s_Denmark[s_Denmark$fungicide =="control",]
+names(control)[3] <- c("mean_control")
+names(control)[6] <- c("lower_control")
+names(control)[7] <- c("upper_control")
+s_Denmark <- s_Denmark[s_Denmark$fungicide =="TU-1",]
+names(s_Denmark)[3] <- c("mean_TU-1")
+s_Denmark <- cbind(s_Denmark, control[c(3,6,7)])
+s_Denmark$mean <- ((s_Denmark$`mean_TU-1` - s_Denmark$mean_control) /
+                     s_Denmark$mean_control)*100
+s_Denmark$lower_CI <- ((s_Denmark$lower.CL - s_Denmark$mean_control) /
+                         s_Denmark$mean_control)*100
+s_Denmark$upper_CI <- ((s_Denmark$upper.CL - s_Denmark$mean_control) /
+                         s_Denmark$mean_control)*100
+s_Denmark$lower_cont_CI <- ((s_Denmark$lower_control - s_Denmark$mean_control) /
+                              s_Denmark$mean_control)*100
+s_Denmark$upper_cont_CI <- ((s_Denmark$upper_control - s_Denmark$mean_control) /
+                              s_Denmark$mean_control)*100
+s_Denmark$sig <- c("*", "*", " ")
+s_Denmark$region <- as.factor(s_Denmark$region)
+```
+
+### preparing the single graphs
+
+For Denmark
+```{r}
+p1 <-   ggplot(s_Denmark, aes(x = region)) +
+  geom_pointrange(aes(y = mean, ymin = lower_CI, ymax = upper_CI))+
+  geom_hline(aes(yintercept = 0), linetype = 'solid', colour="grey50") +
+  geom_hline(aes(yintercept = lower_cont_CI), linetype = 'dashed') +
+  geom_hline(aes(yintercept = upper_cont_CI), linetype = 'dashed') +
+  facet_wrap(~cycle) +
+  ylab('Changes in decomposed leaf mass [%]')+
+  xlab("")+
+  ylim(-80,31)+
+  ggtitle("Denmark")+
+  geom_text(aes(x=1,y=30,label=sig), cex=8) +
+  theme_classic()+
+  theme(axis.text.x = element_blank(),axis.ticks.x = element_blank(), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        legend.position="none", strip.text.x = element_text(face = "bold"),
+        text = element_text(size=14))
+  
+
+```
+
+For Germany
+
+```{r}
+p2 <- ggplot(s_Germany, aes(x = region)) +
+  geom_pointrange(aes(y = mean, ymin = lower_CI, ymax = upper_CI))+
+  geom_hline(aes(yintercept = 0), linetype = 'solid', colour="grey50") +
+  geom_hline(aes(yintercept = lower_cont_CI), linetype = 'dashed') +
+  geom_hline(aes(yintercept = upper_cont_CI), linetype = 'dashed') +
+  facet_wrap(~cycle) +
+  ylab('')+
+  xlab("")+
+  ylim(-80,31)+
+  ggtitle("Germany")+
+  geom_text(aes(x=1,y=30,label=sig), cex=8) +
+  theme_classic()+
+  theme(axis.text.x = element_blank(),axis.ticks.x = element_blank(), 
+        axis.text.y = element_text(colour="black", size = 12), 
+        legend.position="none", strip.text.x = element_text(face = "bold"), 
+        text = element_text(size=14))
+```
+
+For Sweden
+```{r}
+p3 <-   ggplot(s_Sweden, aes(x = region)) +
+  geom_pointrange(aes(y = mean, ymin = lower_CI, ymax = upper_CI))+
+  geom_hline(aes(yintercept = 0), linetype = 'solid', colour="grey50") +
+  geom_hline(aes(yintercept = lower_cont_CI), linetype = 'dashed') +
+  geom_hline(aes(yintercept = upper_cont_CI), linetype = 'dashed') +
+  facet_wrap(~cycle) +
+  ylab('')+
+  xlab("")+
+  ylim(-80,31)+
+  ggtitle("Sweden")+
+  geom_text(aes(x=1,y=30,label=sig), cex=8) +
+  theme_classic()+
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        axis.text.y = element_text(colour="black", size = 12),
+        legend.position="none",strip.text.x = element_text(face = "bold" ), 
+        text = element_text(size=14))
+```
+
+### Combining single graphs to one and save them
+
+```{r}
+svg(filename="Fig_2.svg", width=10, height=4, pointsize=12)
+ggdraw() +
+  draw_plot(p1, x = 0, y = 0, width = .33, height = 1) +
+  draw_plot(p2, x = .33, y = 0, width = .33, height = 1) +
+  draw_plot(p3, x = 0.66, y = 0, width = 0.33, height = 1)
+dev.off()
+```
+
+Colouring of the colonisation cycles (boxes on the top) afterwards in inkscape.
+
+## Preparing Fig. 3: structural response 
+
+At first preparing a grid to arange the single graphs
+```{r}
+# svg(filename="Fig_3.svg", width=10, height=4, pointsize=12)
+par(mfrow = c(1, 3))
+```
+
+Plot for Denmark
+
+```{r}
+scl = 'symmetric'
+# arange size of single plot
+si_sc <- scores(rda_species_DK_3, choices = 1:2, scaling = scl, display = 'sites')
+sp_sc <- scores(rda_species_DK_3, choices = 1:2, scaling = scl, display = 'species')
+va_sc <- scores(rda_species_DK_3, choices = 1:2, scaling = scl, display = 'cn')
+
+
+# empty plot
+p <- plot(rda_species_DK_3, 
+          scaling = 'symmetric', 
+          type = 'n',
+          xlab = 
+            paste(attributes(summary(rda_species_DK_3)$cont$importance)$dimnames[[2]][1],
+                     " (", round(summary(rda_species_DK_3)$cont$importance[2,1]*100),  
+                     "% total variance)", sep=""),
+          ylab = 
+            paste(attributes(summary(rda_species_DK_3)$cont$importance)$dimnames[[2]][2],
+                     " (", round(summary(rda_species_DK_3)$cont$importance[2,2]*100),  
+                     "% total variance)", sep=""), 
+          main = "Denmark", cex.lab = 1.5, cex.axis = 1.5, cex.main = 1.5)
+
+# add points colored by fungicide treatment
+cols <- c("#19A1BF", "#F00303")
+# points shaped by cycle
+pchs <- c(15, 16, 17)
+points(si_sc, 
+       col = cols[Fak_conid_DK$fungicide],  # color by fungicide
+       pch = pchs[Fak_conid_DK$cycle],      # shape by cycle
+       cex = 1.5)
+
+# legend will only be added in one of the three graphs
+legend('bottomright', 
+       legend = c("control", "fungicide", paste0('cycle ', levels(Fak_conid_SW$cycle))),
+       col = c(cols, 'grey20', 'grey20', 'grey20'),
+       pch = c(rep(16, 2), 15, 16, 17), bty = "n", cex=1.3)
+
+# connect single points per fungicide treatment and cycle
+ordispider(p, interaction(Fak_conid_DK$cycle, Fak_conid_DK$fungicide), 
+           col = rep(cols, each = 3), label = F)
+```
+
+Plot for Gemamy
+
+```{r}
+scl = 'symmetric'
+# arange size of single plot
+si_sc <- scores(rda_species_DE_4, choices = 1:2, scaling = scl, display = 'sites')
+sp_sc <- scores(rda_species_DE_4, choices = 1:2, scaling = scl, display = 'species')
+va_sc <- scores(rda_species_DE_4, choices = 1:2, scaling = scl, display = 'cn')
+
+
+# empty plot
+p <- plot(rda_species_DE_4, scaling = 'symmetric', type = 'n',
+          xlab = 
+            paste(attributes(summary(rda_species_DE_4)$cont$importance)$dimnames[[2]][1],
+                     " (", round(summary(rda_species_DE_4)$cont$importance[2,1]*100), 
+                     "% total variance)", sep=""),
+          ylab = 
+            paste(attributes(summary(rda_species_DE_4)$cont$importance)$dimnames[[2]][2],
+                     " (", round(summary(rda_species_DE_4)$cont$importance[2,2]*100), 
+                     "% total variance)", sep=""), 
+          main = "Germany", cex.lab = 1.5, cex.axis = 1.5, cex.main = 1.5)
+
+# add points colored by fungicide treatment
+cols <- c("#19A1BF", "#F00303")
+# points shaped by cycle
+pchs <- c(16, 17)
+points(si_sc, 
+       col = cols[Fak_conid_DE$fungicide],  # color by fungicide
+       pch = pchs[Fak_conid_DE$cycle],      # shape by cycle
+       cex = 1.5)
+
+# connect singe points per fungicide treatment and cycle
+ordispider(p, interaction(Fak_conid_DE$cycle, Fak_conid_DE$fungicide), 
+           col = rep(cols, each = 2), label = F)
+```
+
+
+For Sweden
+
+```{r}
+scl = 'symmetric'
+# arange size of single plot
+si_sc <- scores(rda_species_SW_4, choices = 1:2, scaling = scl, display = 'sites')
+sp_sc <- scores(rda_species_SW_4, choices = 1:2, scaling = scl, display = 'species')
+va_sc <- scores(rda_species_SW_4, choices = 1:2, scaling = scl, display = 'cn')
+
+
+# empty plot
+p <- plot(rda_species_SW_4, scaling = 'symmetric', type = 'n',
+          xlab = 
+            paste(attributes(summary(rda_species_SW_4)$cont$importance)$dimnames[[2]][1],
+                     " (", round(summary(rda_species_SW_4)$cont$importance[2,1]*100),  
+                     "% total variance)", sep=""),
+          ylab = 
+            paste(attributes(summary(rda_species_SW_4)$cont$importance)$dimnames[[2]][2],
+                     " (", round(summary(rda_species_SW_4)$cont$importance[2,2]*100),  
+                     "% total variance)", sep=""), 
+          main = "Sweden", cex.lab=1.5, cex.axis = 1.5, cex.main=1.5)
+
+# add points colored by fungicide treatment
+cols <- c("#19A1BF", "#F00303")
+# points shaped by cycle
+pchs <- c(15, 16, 17)
+points(si_sc, 
+       col = cols[Fak_conid_SW$fungicide],  # color by fungicide
+       pch = pchs[Fak_conid_SW$cycle],      # shape by cycle
+       cex = 1.5)
+
+
+# connect singe points per fungicide treatment and cycle
+ordispider(p, interaction(Fak_conid_SW$cycle, Fak_conid_SW$fungicide), 
+           col = rep(cols, each = 3), label = F)
+
+#dev.off()
+```
+
+
+
+## Supplementary Material - Data Australia
+
+#### Model the data
+##### Fit model
+
+We fit our model using:
+
+```{r}
+mod1_AUS_OMD <- lm(DLM ~ fungicide + cycle + fungicide:cycle, 
+           data = data_AUS)
+```
+
+##### Diagnose model
+First we check some model diagnostics:
+```{r}
+par(mfrow = c(2, 2))
+plot(mod1_AUS_OMD)
+```
+
+Model fits.
+
+##### Detailed look at interaction
+Let's futher investigate the differences using least-square means (lsmeans).
+
+This calculates the lsmeans for fungicides within each cycle.
+```{r}
+lsm_AUS <- lsmeans(mod1_AUS_OMD, ~ fungicide | cycle)
+
+lsm_dunn <- contrast(lsm_AUS, 'trt.vs.ctrl')
+(lsm_dunn_sum <- summary(lsm_dunn, infer = TRUE, adjust = 'mvt'))
+```
+
+### Calculating effect sizes + their standard deviations
+
+```{r}
+s_AUS <- as.data.frame(summary(lsm_AUS))
+s_AUS$region <- c("Australia")
+control <- s_AUS[s_AUS$fungicide =="control",]
+names(control)[3] <- c("mean_control")
+names(control)[6] <- c("lower_control")
+names(control)[7] <- c("upper_control")
+s_AUS <- s_AUS[s_AUS$fungicide =="TU-1",]
+names(s_AUS)[3] <- c("mean_TU-1")
+s_AUS <- cbind(s_AUS, control[c(3,6,7)])
+s_AUS$mean <- ((s_AUS$`mean_TU-1` - s_AUS$mean_control) / s_AUS$mean_control)*100
+s_AUS$lower_CI <- ((s_AUS$lower.CL - s_AUS$mean_control) / s_AUS$mean_control)*100
+s_AUS$upper_CI <- ((s_AUS$upper.CL - s_AUS$mean_control) / s_AUS$mean_control)*100
+
+s_AUS$lower_cont_CI <- ((s_AUS$lower_control - s_AUS$mean_control) / s_AUS$mean_control)*100
+s_AUS$upper_cont_CI <- ((s_AUS$upper_control - s_AUS$mean_control) / s_AUS$mean_control)*100
+c1 <-data.frame(NA,"1",NA,NA, NA, NA, NA, "Australia", NA, NA, NA, NA, NA, NA, NA, NA)
+names(c1) <- names(s_AUS)
+s_AUS <- rbind(c1, s_AUS)
+s_AUS$sig <- c("", "", "")
+s_AUS$lab <- c("NA", "", "")
+```
+
+### preparing Supplementary Fig. 1
+
+For Australia
+```{r}
+
+# svg(filename="DLM_AUS.svg", width=4, height=4, pointsize=12)
+ggplot(s_AUS, aes(x = region))+
+  geom_pointrange(aes(y = mean, ymin = lower_CI, ymax = upper_CI))+
+    geom_hline(aes(yintercept = c(NA, 0,0)), linetype = 'solid', colour="grey50") +
+    geom_hline(aes(yintercept = lower_cont_CI), linetype = 'dashed') +
+    geom_hline(aes(yintercept = upper_cont_CI), linetype = 'dashed') +
+    facet_wrap(~cycle) +
+  # scale_color_manual(values = c('grey30','black')) +
+  ylab('Changes in decomposed leaf mass [%]')+
+  xlab("")+
+  ylim(-25,10)+
+  ggtitle("Australia")+
+  geom_text(aes(x=1,y=30,label=sig), cex=8) +
+  theme_classic()+
+  theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
+        axis.text.y = element_text(colour="black", size = 12),
+        legend.position="none", strip.text.x = element_text(face = "bold" ), 
+       text = element_text(size=14))+
+  geom_text(aes(x=1,y=-5,label=lab))
+
+# dev.off()
+
+```
+
+Colouring of the colonisation cycles (boxes on the top) afterwards in inkscape.
+
+
+## Supplementary Material - hyphomycete taxa richness
+
+Calculating respective CI of taxa richness
+
+```{r}
+species_all <- group.CI(species ~ region + fungicide + cycle,
+         data=data_all,
+         ci = 0.95)
+```
+
+### dividing these for regions
+
+```{r}
+species_DE <- species_all[species_all$region =="Germany",]
+c1 <-data.frame("Germany","control","1",NA, NA, NA)
+names(c1) <- names(species_DE)
+species_DE <- rbind(c1, species_DE)
+species_DE$lab <- c("NA", "", "", "",  "")
+
+species_DK <- species_all[species_all$region =="Denmark",]
+
+species_SW <- species_all[species_all$region =="Sweden",]
+species_SW$fungicide <- gsub("TU-1", "fungicide", species_SW$fungicide)
+```
+
+### Prepare Supplementary Fig. 2
+
+```{r}
+p1_species <- ggplot(species_DK, aes(x = fungicide)) +
+  geom_pointrange(aes(y = species.mean, ymin = species.lower, 
+                      ymax = species.upper, shape= fungicide))+
+  facet_wrap(~cycle)+
+  ylab('Hyphomycete taxa richness')+
+  xlab("")+
+  ylim(1,18)+
+  ggtitle("Denmark")+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),axis.text.y = element_text(colour="black", 
+                                                                  size = 12),
+        legend.position="none", strip.text.x = element_text(face = "bold" ), 
+        text = element_text(size=14))
+
+p2_species <- ggplot(species_DE, aes(x = fungicide)) +
+  geom_pointrange(aes(y = species.mean, ymin = species.lower, ymax = species.upper, 
+                      shape= fungicide))+
+  facet_wrap(~cycle)+
+  ylab('')+
+  xlab("")+
+  ylim(1,18)+
+  ggtitle("Germany")+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),axis.text.y = element_text(colour="black", 
+                                                                  size = 12),
+        legend.position="none", strip.text.x = element_text(face = "bold" ), 
+        text = element_text(size=14)) + geom_text(aes(x=2,y=10,label=lab))
+
+p3_species <- ggplot(species_SW, aes(x = fungicide)) +
+  geom_pointrange(aes(y = species.mean, ymin = species.lower, ymax = species.upper, 
+                      shape= fungicide))+
+  facet_wrap(~cycle)+
+  ylab('')+
+  xlab("")+
+  ylim(1,18)+
+  ggtitle("Sweden")+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),axis.text.y = element_text(colour="black", 
+                                                                  size = 12),
+        legend.position = c(0.85, 0.86), strip.text.x = element_text(face = "bold" ), 
+        text = element_text(size=14), legend.title = element_blank())
+
+
+# svg(filename="Taxa_richness.svg", width=10, height=4, pointsize=12)
+ggdraw() +
+  draw_plot(p1_species, x = 0, y = 0, width = .33, height = 1) +
+  draw_plot(p2_species, x = .33, y = 0, width = .33, height = 1) +
+  draw_plot(p3_species, x = 0.66, y = 0, width = 0.33, height = 1)
+# dev.off()
+```
+
+Colouring of the colonisation cycles (boxes on the top) afterwards in inkscape.
+
+
+## Supplementary Material - Absolute DLM
+
+Calculating respective CI of DLM
+
+```{r}
+data_all$DLM <- data_all$DLM*1000
+DLM_all <- group.CI(DLM ~ region + fungicide + cycle,
+         data=data_all,
+         ci = 0.95)
+```
+
+### dividing data for regions
+
+```{r}
+DLM_DE <- DLM_all[DLM_all$region =="Germany",]
+
+DLM_DK <- DLM_all[DLM_all$region =="Denmark",]
+
+DLM_SW <- DLM_all[DLM_all$region =="Sweden",]
+DLM_SW$fungicide <- gsub("TU-1", "fungicide", DLM_SW$fungicide)
+```
+
+### preparing Supplementary Fig. 3
+
+```{r}
+p1_DLM <- ggplot(DLM_DK, aes(x = fungicide)) +
+  geom_pointrange(aes(y = DLM.mean, ymin = DLM.lower, ymax = DLM.upper, shape= fungicide))+
+  facet_wrap(~cycle)+
+  ylab('decomposed leaf mass [mg] per dday')+
+  xlab("")+
+  ylim(2,40)+
+  ggtitle("Denmark")+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),axis.text.y = element_text(colour="black", 
+                                                                  size = 12),
+        legend.position="none", strip.text.x = element_text(face = "bold" ), 
+        text = element_text(size=14))
+
+p2_DLM <- ggplot(DLM_DE, aes(x = fungicide)) +
+  geom_pointrange(aes(y = DLM.mean, ymin = DLM.lower, ymax = DLM.upper, shape= fungicide))+
+  facet_wrap(~cycle)+
+  ylab('')+
+  xlab("")+
+  ylim(2,40)+
+  ggtitle("Germany")+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),axis.text.y = element_text(colour="black", 
+                                                                  size = 12),
+        legend.position="none", strip.text.x = element_text(face = "bold" ), 
+        text = element_text(size=14))
+
+p3_DLM <- ggplot(DLM_SW, aes(x = fungicide)) +
+  geom_pointrange(aes(y = DLM.mean, ymin = DLM.lower, ymax = DLM.upper, shape= fungicide))+
+  facet_wrap(~cycle)+
+  ylab('')+
+  xlab("")+
+  ylim(2,40)+
+  ggtitle("Sweden")+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),axis.text.y = element_text(colour="black", 
+                                                                  size = 12), 
+        legend.position = c(0.85, 0.86), strip.text.x = element_text(face = "bold" ), 
+        text = element_text(size=14), legend.title = element_blank())
+
+
+# svg(filename="DLM_absolute_values.svg", width=10, height=4, pointsize=12)
+ggdraw() +
+  draw_plot(p1_DLM, x = 0, y = 0, width = .33, height = 1) +
+  draw_plot(p2_DLM, x = .33, y = 0, width = .33, height = 1) +
+  draw_plot(p3_DLM, x = 0.66, y = 0, width = 0.33, height = 1)
+# dev.off()
+```
+
+Colouring of the colonisation cycles (boxes on the top) afterwards in inkscape.
