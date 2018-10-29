@@ -20,7 +20,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Similar dynamics of microbial functional stress response across biogeographical regions
+# Similar recovery time of microbial functions from fungicide stress across biogeographical regions
 
 Verena C. Schreiner, Alexander Feckler, Diego Fernández, Katharina Frisch, Katherine Muñoz, Eduard Szöcs, Jochen Zubrod, Mirco Bundschuh, Jes J. Rasmussen, Ben J. Kefford, Josepha Axelsen, Nina Cedergreen  & Ralf B. Schäfer
 
@@ -107,10 +107,12 @@ change formatting of data
 data_all_OMD <- data_all[,c(1,2,3,5,11)]
 
 data_all_OMD_control_u <- data_all_OMD[data_all_OMD$fungicide == "control",]
-data_all_OMD_control <-  melt(data_all_OMD_control_u, id = c("fungicide", "cycle", "region",
-                                                             "Number.replicate"))
+data_all_OMD_control <-  melt(data_all_OMD_control_u, 
+                              id = c("fungicide", "cycle", "region",
+                                     "Number.replicate"))
 
-data_all_OMD_control <- dcast(data_all_OMD_control, fungicide + cycle + region ~ variable, mean)
+data_all_OMD_control <- dcast(data_all_OMD_control, fungicide + cycle + region ~ variable,
+                              mean)
 
 data_all_OMD_control <- merge(data_all_OMD_control_u[-5], data_all_OMD_control, 
                               by=c("fungicide", "cycle", "region"))
@@ -120,8 +122,8 @@ data_all_OMD_control <- data_all_OMD_control[-1]
 data_all_OMD_trt <- data_all_OMD[! data_all_OMD$fungicide == "control",]
 data_all_OMD_trt <- data_all_OMD_trt[-1]
 
-data_all_OMD_perc <- merge(data_all_OMD_control, data_all_OMD_trt, by=c("cycle", "region",
-                                                                        "Number.replicate"))
+data_all_OMD_perc <- merge(data_all_OMD_control, data_all_OMD_trt, 
+                           by=c("cycle", "region", "Number.replicate"))
 names(data_all_OMD_perc)[5] <- c("treatment")
 
 ```
@@ -130,6 +132,11 @@ calulating relative differences of fungicide treatment to the respective control
 ```{r}
 data_all_OMD_perc$diff <- ((data_all_OMD_perc$treatment - data_all_OMD_perc$control) /   
                              data_all_OMD_perc$control)*100
+```
+
+remove the biogeographical region of Australia
+```{r}
+data_all_OMD_perc <- data_all_OMD_perc[!data_all_OMD_perc$region == "Australia",]
 ```
 
 
@@ -195,9 +202,11 @@ rownames(data_AUS) <- NULL
 ##### Fit model
 Using a mixed model where the replicates are a random effect, which is nested in the regions
 ```{r}
-mod1_all_OMD_perc <- lmer(diff ~ region + cycle + (region | Number.replicate),   
+mod1_all_OMD_perc <- lmer(diff ~ region + cycle + region:cycle + 
+                            (region | Number.replicate),   
                           data = data_all_OMD_perc)
 ```
+
 
 ##### Diagnose model
 First we check some model diagnostics:
@@ -209,14 +218,11 @@ plot(mod1_all_OMD_perc)
 Model fits.
 
 
-
 ##### Investigate significance
 
 ```{r}
 drop1(mod1_all_OMD_perc, test = 'Chisq')
 ```
-
-Factor region is not significant, while the cycle displays a significant relationship.
 
 
 ### Germany
